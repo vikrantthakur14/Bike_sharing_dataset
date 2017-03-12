@@ -1,0 +1,99 @@
+# Bike sharing
+The model tries to predict the total count of bikes rented on a new test set
+
+**Importing dataset from "https://www.kaggle.com/c/bike-sharing-demand/data"**
+```{r}
+# Loading required libraries
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+library(reshape2)
+library(ranger)
+train=read.csv("../input/train.csv")
+test=read.csv("../input/test.csv")
+
+# Visualizing dataset
+str(train);str(test)
+any(is.na(train));any(is.na(test))   # Checking for NA's
+all(train$casual + train$registered == train$count)
+
+# Converting non-numerical features to categorical variables
+factor_features=c('season','holiday','workingday','weather')
+train[,factor_features]=lapply(train[,factor_features],as.factor)
+test[,factor_features]=lapply(test[,factor_features],as.factor)
+```
+**Checking for correlation between numeric features**
+```{r}
+numeric_features=c('temp','atemp','humidity','windspeed','casual','registered','count')
+cormat=cor(train[,numeric_features])
+melted_cormat=melt(cormat)
+head(melted_cormat)
+ggplot(data = melted_cormat, aes(x=Var1, y=Var2, fill=value)) + geom_tile() + ggtitle("Heatmap for correlation matrix of the dataset")
+                                                    ### can use geom_raster() instead for many features 
+```
+
+**Extracting all important features from datetime**
+```{r}
+train_date=ymd_hms(train$datetime);             test_date=ymd_hms(test$datetime)   # yearmonthday_hourmonthsecond()
+                                                                                   # the given datetime format
+train$year=factor(year(train_date));            test$year=factor(year(test_date))
+train$month=factor(month(train_date));          test$month=factor(month(test_date))
+train$day=factor(day(train_date));              test$day=factor(day(test_date))
+train$hour=factor(hour(train_date));            test$hour=factor(hour(test_date))
+train$Weekday=factor(wday(train_date,label=T)); test$Weekday=factor(wday(test_date,label=T))
+
+day_levels=append(levels(train$day),levels(test$day))                              # Making levels similar for day
+levels(train$day)=day_levels
+levels(test$day)=day_levels
+```
+
+**Visualizing hourly trends of count grouped by Season and Weekdays**
+```{r}
+season_summary = train %>% group_by(season,hour) %>% summarise(count=mean(count))
+weekday_summary= train %>% group_by(Weekday,hour) %>% summarise(count=mean(count))
+
+ggplot(data=season_summary,aes(x=hour,y=count,group=season,colour=season)) + geom_point() + geom_line()
+ggplot(data=weekday_summary,aes(x=hour,y=count,group=Weekday,colour=Weekday)) + geom_point() + geom_line()
+```
+**Above plots give an idea of the trend followed on weekends(i.e. Sat & Sun) vs workingdays                                                 
+It is also clear that there are few peakhours for both weekdays and weekends**
+```{r}
+# Creating new feature for weekends
+train$weekend = factor(as.integer(train$Weekday %in% c('Sun','Sat')))
+test$weekend = factor(as.integer(test$Weekday %in% c('Sun','Sat')))
+
+# New feature for peakhours
+train$peakhours = factor(as.integer((train$weekend==1 & train$hour %in% c(11,12,13,14,15,16,17)) | (train$weekend==0 & train$hour %in% c(8,17,18,19))))
+test$peakhours = factor(as.integer((test$weekend==1 & test$hour %in% c(11,12,13,14,15,16,17)) | (test$weekend==0 & test$hour %in% c(8,17,18,19))))
+```
+
+**Creating scatter plots matrix for some insight**
+```{r}
+pairs(formula=~hour+day+weekend+weather+atemp+humidity+windspeed+peakhours+count,data=train)
+```
+
+**Finally creating a model using ranger (Boosted version of RandomForest)**
+```{r}
+train$count=log1p(train$count)                     # Scaling to log(1+x)
+train$casual=log1p(train$casual)
+train$registered=log1p(train$registered)
+
+# Model on count
+model = ranger(formula = count~season+holiday+workingday+weather+temp+atemp+humidity+windspeed+year+month+day+hour+Weekday+weekend+peakhours, data=train)
+prediction=predict(model,test)
+
+# Model on casual
+model1 = ranger(formula = casual~season+holiday+workingday+weather+temp+atemp+humidity+windspeed+year+month+day+hour+Weekday+weekend+peakhours, data=train)
+prediction1=predict(model1,test)
+
+# Model on registered
+model2 = ranger(formula = registered~season+holiday+workingday+weather+temp+atemp+humidity+windspeed+year+month+day+hour+Weekday+weekend+peakhours, data=train)
+prediction2=predict(model2,test)
+
+final_prediction=(expm1(prediction$predictions)+expm1(prediction1$predictions)+expm1(prediction2$predictions))/2
+                                              # As casual+registered=count
+submit = data.frame(datetime=test$datetime,count=final_prediction)
+head(submit)
+write.csv(submit,"submit.csv",row.names=F)
+```
+
