@@ -1,5 +1,5 @@
 # Bike sharing
-The model tries to predict the total count of bikes rented on a new test set
+The model tries to predict the total count of bikes rented on a new test set.                                               
 The training set is comprised of the first 19 days of each month, while the test set is the 20th to the end of the month
 
 **Importing dataset from "https://www.kaggle.com/c/bike-sharing-demand/data"**
